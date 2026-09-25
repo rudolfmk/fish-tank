@@ -6,6 +6,7 @@ import { AudioRecorder } from "@/components/audio-recorder";
 import { AIExtraction } from "@/components/ai-extraction";
 import { AssistantPanel } from "@/components/assistant-panel";
 import { PatientBanner } from "@/components/patient-banner";
+import { RedFlagAlerts } from "@/components/red-flag-alerts";
 import { SafetyBanner } from "@/components/safety-banner";
 import { NextLink, SectionTitle, Shell, Status } from "@/components/shell";
 import { Transcript } from "@/components/transcript";
@@ -19,7 +20,7 @@ export default function Nurse(){
   const items=liveActive?live.map(segment=>({speaker:segment.speaker,time:segment.start!=null?formatTime(segment.start):"Live",text:segment.text})):saved;
 
   const reset=()=>{if(window.confirm("Reset the nurse session? This will remove the nurse recording and all downstream doctor and report data.")){resetStage("nurse");setLive([]);setLiveActive(false)}};
-  return <Shell title="Nurse workspace" eyebrow="Clinical intake" actions={<button onClick={reset} className="btn-secondary text-red-700"><ArrowPathIcon className="h-4 w-4"/> Reset nurse session</button>}><div className="flex flex-col gap-6"><SafetyBanner/><PatientBanner status="Nurse intake"/><div className="grid gap-6 xl:grid-cols-[1fr_380px]"><div className="space-y-6">
+  return <Shell title="Nurse workspace" eyebrow="Clinical intake" actions={<button onClick={reset} className="btn-secondary text-red-700"><ArrowPathIcon className="h-4 w-4"/> Reset nurse session</button>}><div className="flex flex-col gap-6"><SafetyBanner/><PatientBanner status="Nurse intake"/><RedFlagAlerts segments={liveActive?live:nurseResult?.segments||[]} live={liveActive}/><div className="grid gap-6 xl:grid-cols-[1fr_380px]"><div className="space-y-6">
     <div className="card p-6"><div className="flex flex-wrap items-start justify-between gap-4"><SectionTitle eyebrow="Reception handoff" title="Visit information" description="Information entered during patient intake."/><Status tone="blue">Captured at reception</Status></div><div className="mt-6 grid gap-5 sm:grid-cols-3"><Info label="Reason for visit" value={patient.reason}/><Info label="Appointment" value={patient.appointment?new Date(patient.appointment).toLocaleString():"Not entered"}/><Info label="Insurance" value={patient.insurance}/></div></div>
     <AudioRecorder role="nurse" onComplete={result=>{setLiveActive(false);setResult("nurse",result)}} onLive={(segments,active)=>{setLive(segments);setLiveActive(active)}}/>
     <div className={`card p-6 transition ${liveActive?"ring-2 ring-red-200":""}`}><div className="mb-6 flex items-center justify-between"><SectionTitle eyebrow="Live transcript" title="Nurse intake conversation" description="The text below comes from this recording and remains after it is saved."/>{liveActive?<Status tone="amber">Listening live</Status>:nurseResult?<Status>Saved transcript</Status>:<Status tone="slate">No recording yet</Status>}</div>{items.length?<Transcript items={items}/>:<EmptyTranscript/>}</div>

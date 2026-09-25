@@ -6,6 +6,7 @@ import { ArrowPathIcon, CheckCircleIcon, ClockIcon, ExclamationTriangleIcon } fr
 import { AIExtraction } from "@/components/ai-extraction";
 import { AudioRecorder } from "@/components/audio-recorder";
 import { PatientBanner } from "@/components/patient-banner";
+import { RedFlagAlerts } from "@/components/red-flag-alerts";
 import { SafetyBanner } from "@/components/safety-banner";
 import { SectionTitle, Shell, Status } from "@/components/shell";
 import { Transcript } from "@/components/transcript";
@@ -48,7 +49,7 @@ export default function Doctor(){
   const nurseConversation=nurseResult?.segments.map(segment=>({speaker:segment.speaker,time:segment.start!=null?formatTime(segment.start):"",text:segment.text}))||[];
   const symptomTimeline=dedupeTimeline([...(nurseResult?.symptom_timeline||[]),...(doctorResult?.symptom_timeline||[])]);
   const reset=()=>{if(window.confirm("Reset the doctor session? This will preserve nurse intake but remove the doctor recording and generated reports.")){resetStage("doctor");setLive([]);setLiveActive(false);setDone(false);setError("")}};
-  return <Shell title="Doctor workspace" eyebrow="Consultation" actions={<button onClick={reset} className="btn-secondary text-red-700"><ArrowPathIcon className="h-4 w-4"/> Reset doctor session</button>}><div className="space-y-6"><SafetyBanner/><PatientBanner status="Ready for doctor"/><div className="grid gap-6 xl:grid-cols-[1fr_390px]"><div className="space-y-6">
+  return <Shell title="Doctor workspace" eyebrow="Consultation" actions={<button onClick={reset} className="btn-secondary text-red-700"><ArrowPathIcon className="h-4 w-4"/> Reset doctor session</button>}><div className="space-y-6"><SafetyBanner/><PatientBanner status="Ready for doctor"/><RedFlagAlerts segments={[...(nurseResult?.segments||[]),...(liveActive?live:doctorResult?.segments||[])]} live={liveActive}/><div className="grid gap-6 xl:grid-cols-[1fr_390px]"><div className="space-y-6">
     <div className="card p-6"><SectionTitle eyebrow="Patient overview" title="Nurse handoff" description="This overview contains only patient intake and saved nurse-transcript information."/><div className="mt-6 grid gap-4 md:grid-cols-2"><Overview title="Reason for visit">{patient.reason||"Not entered"}</Overview><Overview title="Nurse symptoms">{nurseFields?.symptoms?.value||"Not documented"}</Overview><Overview title="Allergies">{nurseFields?.allergies?.value||"Not documented"}</Overview><Overview title="Current medication">{nurseFields?.current_medications?.value||"Not documented"}</Overview></div></div>
     <SymptomTimeline entries={symptomTimeline}/>
     <AudioRecorder role="doctor" onComplete={result=>{setLiveActive(false);setResult("doctor",result)}} onLive={(segments,active)=>{setLive(segments);setLiveActive(active)}}/>

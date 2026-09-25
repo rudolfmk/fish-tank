@@ -223,3 +223,111 @@ def outputs(req: OutputRequest):
     val=lambda k: (f.get(k) or {}).get("value") or "Not documented"
     medication = val("current_medications") if (f.get("current_medications") or {}).get("source") == "doctor" else "No clinician-documented medication"
     return {"insurance":{"clinical_summary":f"{val('chief_complaint')}. Symptoms: {val('symptoms')}. Duration: {val('duration')}.","diagnosis":val("diagnosis"),"procedures":val("examination_findings"),"clinical_justification":"Based only on the verified chief complaint, symptoms, examination, and clinician documentation.","supporting_evidence":sum([(f.get(k) or {}).get("evidence",[]) for k in FIELDS],[])},"pharmacy":{"medication":medication,"dosage":"Not documented","frequency":"Not documented","duration":"Not documented","instructions":val("treatment") if medication != "No clinician-documented medication" else "Not documented","allergies":val("allergies")},"patient":{"what_happened":f"You were seen for {val('chief_complaint').lower()}.","clinician_documented":val("diagnosis"),"medication_instructions":medication,"follow_up":val("follow_up_instructions"),"warnings":val("follow_up_instructions")}}
+
+class ClaimsRequest(BaseModel):
+    fields: dict[str, EvidenceField]
+    segments: list[Segment]
+
+class ClaimVerdict(BaseModel):
+    field: str
+    status: Literal["supported", "partial", "unsupported"]
+    unsupported_text: str | None
+    reason: str
+
+class ClaimsReport(BaseModel):
+    verdicts: list[ClaimVerdict]
+
+class RedFlagRequest(BaseModel):
+    segments: list[Segment]
+
+class RedFlagAlert(BaseModel):
+    condition: str
+    urgency: Literal["emergency", "urgent"]
+    triggers: list[str]
+    rationale: str
+    clinician_check: str
+
+class RedFlagReport(BaseModel):
+    alerts: list[RedFlagAlert]
+
+class PatientSummaryRequest(BaseModel):
+    record: dict
+    language: str = Field(min_length=2, max_length=40)
+
+class PatientSummary(BaseModel):
+    greeting: str
+    what_happened: str
+    what_clinician_found: str
+    medicines: str
+    self_care: str
+    next_steps: str
+    urgent_help: str
+
+def normalize(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+def in_transcript(quote: str, transcript: str) -> bool:
+    quote = normalize(quote)
+    return bool(quote) and quote in transcript
+
+def structured(system: str, user: str, schema: type[BaseModel], name: str):
+    ai = client()
+    if os.getenv("OPENROUTER_API_KEY"):
+        completion = ai.chat.completions.create(
+            model=os.getenv("OPENROUTER_TEXT_MODEL", "google/gemini-3.6-flash"),
+            messages=[{"role":"system","content":system + " Return valid JSON matching the supplied schema."},{"role":"user","content":f"{user}\nJSON schema:\n{json.dumps(schema.model_json_schema())}"}],
+            response_format={"type":"json_schema","json_schema":{"name":name,"strict":True,"schema":schema.model_json_schema()}},
+            temperature=0,
+        )
+        content = completion.choices[0].message.content
+        if not content: raise HTTPException(502, "The AI returned an empty response.")
+        return schema.model_validate_json(content)
+    completion = ai.beta.chat.completions.parse(model=os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini"), messages=[{"role":"system","content":system},{"role":"user","content":user}], response_format=schema, temperature=0)
+    parsed = completion.choices[0].message.parsed
+    if not parsed: raise HTTPException(502, "The AI returned an empty response.")
+    return parsed
+
+def transcript_text(segments: list[Segment]) -> str:
+    return "\n".join(f"{s.speaker}: {s.text}" for s in segments)
+
+@app.post("/claims-check")
+def claims_check(req: ClaimsRequest):
+    claims = {key: field for key, field in req.fields.items() if field.value and field.value.strip()}
+    if not claims: return {"results": {}}
+    if not req.segments: raise HTTPException(400, "A saved transcript is required to check claims.")
+    transcript = transcript_text(req.segments)
+    system = """You are a strict fact-checker for clinical documentation. For each claim, decide whether every factual statement in its value is directly stated in the transcript. supported: everything in the value is stated (faithful paraphrase is fine). partial: some statements are stated but at least one is not. unsupported: nothing in the value is stated. Anything inferred, generalized, or added is not supported: diagnoses the clinician never said, numbers, doses, durations, frequencies, body sites, or negations that do not appear. For partial or unsupported, copy the exact unsupported words from the claim value into unsupported_text; otherwise use null. reason is one short sentence. Return exactly one verdict per claim, using the claim's field key."""
+    claim_lines = "\n".join(f"- {key}: {field.value}" for key, field in claims.items())
+    report = structured(system, f"Transcript:\n{transcript}\n\nClaims:\n{claim_lines}", ClaimsReport, "claims_report")
+    verdicts = {verdict.field: verdict for verdict in report.verdicts if verdict.field in claims}
+    normalized = normalize(transcript)
+    results = {}
+    for key, field in claims.items():
+        verdict = verdicts.get(key) or ClaimVerdict(field=key, status="partial", unsupported_text=None, reason="The checker did not return a verdict for this field.")
+        fabricated = [quote for quote in field.evidence if not in_transcript(quote, normalized)]
+        status = "partial" if verdict.status == "supported" and fabricated else verdict.status
+        reason = "Cited evidence does not appear in the transcript." if status != verdict.status else verdict.reason
+        results[key] = {"status": status, "unsupported_text": verdict.unsupported_text, "reason": reason, "fabricated_quotes": fabricated}
+    return {"results": results}
+
+@app.post("/red-flags")
+def red_flags(req: RedFlagRequest):
+    transcript = transcript_text(req.segments)
+    if len(normalize(transcript)) < 12: return {"alerts": []}
+    system = """You are a clinical safety net that surfaces red-flag symptom patterns for a clinician to review. You do not diagnose or recommend treatment. Raise an alert only when the transcript explicitly contains the red-flag features of a time-critical condition, for example: sepsis, stroke (face droop, arm weakness, speech difficulty, sudden onset), acute coronary syndrome, pulmonary embolism, anaphylaxis, meningitis, subarachnoid haemorrhage (sudden worst-ever headache), suicidal ideation or self-harm, diabetic emergency, severe dehydration, ectopic pregnancy, cauda equina syndrome, gastrointestinal bleeding, or severe asthma. Symptoms the speaker denies (for example "no chest pain") must never trigger an alert. Each trigger must be a short quote copied verbatim from the transcript. urgency is emergency for immediately life-threatening patterns and urgent otherwise. rationale is one sentence linking the triggers to the pattern. clinician_check is one neutral next check to confirm or rule out the pattern, with no treatment advice. Return an empty alerts list when nothing qualifies."""
+    report = structured(system, f"Transcript:\n{transcript}", RedFlagReport, "red_flag_report")
+    normalized = normalize(transcript)
+    alerts = []
+    for alert in report.alerts:
+        triggers = [quote for quote in alert.triggers if in_transcript(quote, normalized)]
+        if triggers: alerts.append(alert.model_copy(update={"triggers": triggers}).model_dump())
+    return {"alerts": alerts}
+
+@app.post("/patient-summary", response_model=PatientSummary)
+def patient_summary(req: PatientSummaryRequest):
+    if req.record.get("status") != "clinician_verified": raise HTTPException(400, "Only clinician-verified records can generate patient summaries.")
+    f = req.record.get("fields", {})
+    name = str((req.record.get("patient") or {}).get("name") or "").split(" ")[0]
+    facts = "\n".join(f"- {key}: {(f.get(key) or {}).get('value') or 'Not documented'}" for key in FIELDS)
+    system = f"""Write a warm, plain-language visit summary addressed directly to the patient, entirely in {req.language}, at about a 6th-grade reading level. Use only facts from the verified record; never invent diagnoses, medicines, doses, tests, or instructions, and do not add medical advice beyond the record. Explain medical terms in simple words. When a topic is Not documented, say briefly that it was not discussed. greeting uses the patient's first name if given. medicines covers only clinician-documented medication. urgent_help uses the record's follow-up and safety-net instructions; if there are none, tell the patient to contact the clinic or emergency services if they feel much worse. Each section is 1-3 short sentences."""
+    return structured(system, f"Patient first name: {name or 'unknown'}\nVerified record:\n{facts}", PatientSummary, "patient_summary")

@@ -6,3 +6,6 @@ export type ClinicalFlag={field:string;level:"green"|"yellow"|"red";label:string
 export type SymptomTimelineEntry={day_label:string;description:string;severity?:string|null;evidence:string};
 export type AIResult={segments:Segment[];extraction:Extraction;suggestions:Suggestion[];flags?:ClinicalFlag[];symptom_timeline?:SymptomTimelineEntry[];demo?:boolean};
 export type ClinicalRecord={patient:Record<string,unknown>;fields:Extraction;status:"ai_generated"|"clinician_verified"};
+export type ClaimResult={status:"supported"|"partial"|"unsupported";unsupported_text:string|null;reason:string;fabricated_quotes:string[]};
+export type RedFlagAlert={condition:string;urgency:"emergency"|"urgent";triggers:string[];rationale:string;clinician_check:string};
+export type PatientSummary={greeting:string;what_happened:string;what_clinician_found:string;medicines:string;self_care:string;next_steps:string;urgent_help:string};

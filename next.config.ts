@@ -1,12 +1,16 @@
 import type { NextConfig } from "next";
 
-const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
+const backendUrl = process.env.BACKEND_URL;
 
 const nextConfig: NextConfig = {
   experimental: { proxyTimeout: 180_000 },
   async rewrites() {
-    // On Vercel the FastAPI backend is served by the Python function in /api.
-    if (process.env.VERCEL) return [];
+    // Without BACKEND_URL on Vercel, /api is served by the Python function.
+    if (!backendUrl) {
+      return process.env.VERCEL
+        ? []
+        : [{ source: "/api/:path*", destination: "http://localhost:8000/:path*" }];
+    }
     return [{ source: "/api/:path*", destination: `${backendUrl}/:path*` }];
   },
 };

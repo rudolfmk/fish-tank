@@ -254,7 +254,16 @@ class PatientSummaryRequest(BaseModel):
     record: dict
     language: str = Field(min_length=2, max_length=40)
 
+class SummaryHeadings(BaseModel):
+    what_happened: str
+    what_clinician_found: str
+    medicines: str
+    self_care: str
+    next_steps: str
+    urgent_help: str
+
 class PatientSummary(BaseModel):
+    headings: SummaryHeadings
     greeting: str
     what_happened: str
     what_clinician_found: str
@@ -329,7 +338,7 @@ def patient_summary(req: PatientSummaryRequest):
     f = req.record.get("fields", {})
     name = str((req.record.get("patient") or {}).get("name") or "").split(" ")[0]
     facts = "\n".join(f"- {key}: {(f.get(key) or {}).get('value') or 'Not documented'}" for key in FIELDS)
-    system = f"""Write a warm, plain-language visit summary addressed directly to the patient, entirely in {req.language}, at about a 6th-grade reading level. Use only facts from the verified record; never invent diagnoses, medicines, doses, tests, or instructions, and do not add medical advice beyond the record. Explain medical terms in simple words. When a topic is Not documented, say briefly that it was not discussed. greeting uses the patient's first name if given. medicines covers only clinician-documented medication. urgent_help uses the record's follow-up and safety-net instructions; if there are none, tell the patient to contact the clinic or emergency services if they feel much worse. Each section is 1-3 short sentences."""
+    system = f"""Write a warm, plain-language visit summary addressed directly to the patient, entirely in {req.language}, at about a 6th-grade reading level. Use only facts from the verified record; never invent diagnoses, medicines, doses, tests, or instructions, and do not add medical advice beyond the record. Explain medical terms in simple words. When a topic is Not documented, say briefly that it was not discussed. greeting uses the patient's first name if given. medicines covers only clinician-documented medication. headings holds the section titles, also translated: what happened today, what your clinician documented, your medicines, taking care of yourself, what happens next, and when to get urgent help. medicines must state any documented allergy and what the patient should not take. urgent_help uses the record's follow-up and safety-net instructions; if there are none, tell the patient to contact the clinic or emergency services if they feel much worse. Each section is 1-3 short sentences."""
     return structured(system, f"Patient first name: {name or 'unknown'}\nVerified record:\n{facts}", PatientSummary, "patient_summary")
 
 class AllergyRequest(BaseModel):

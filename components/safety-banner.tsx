@@ -1,0 +1,2 @@
+import { ShieldCheckIcon } from "@heroicons/react/24/outline";
+export function SafetyBanner(){return <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-950"><ShieldCheckIcon className="h-5 w-5 shrink-0"/><div><b>AI-generated information must be reviewed and verified by a qualified healthcare professional before clinical use.</b><span className="ml-1">Only information captured in this workspace should appear in the record.</span></div></div>}

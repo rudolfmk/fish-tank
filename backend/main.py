@@ -331,3 +331,35 @@ def patient_summary(req: PatientSummaryRequest):
     facts = "\n".join(f"- {key}: {(f.get(key) or {}).get('value') or 'Not documented'}" for key in FIELDS)
     system = f"""Write a warm, plain-language visit summary addressed directly to the patient, entirely in {req.language}, at about a 6th-grade reading level. Use only facts from the verified record; never invent diagnoses, medicines, doses, tests, or instructions, and do not add medical advice beyond the record. Explain medical terms in simple words. When a topic is Not documented, say briefly that it was not discussed. greeting uses the patient's first name if given. medicines covers only clinician-documented medication. urgent_help uses the record's follow-up and safety-net instructions; if there are none, tell the patient to contact the clinic or emergency services if they feel much worse. Each section is 1-3 short sentences."""
     return structured(system, f"Patient first name: {name or 'unknown'}\nVerified record:\n{facts}", PatientSummary, "patient_summary")
+
+class AllergyRequest(BaseModel):
+    segments: list[Segment]
+    allergies: str | None = None
+    current_medications: str | None = None
+
+class AvoidMedicine(BaseModel):
+    medicine: str
+    drug_class: str
+    risk: Literal["avoid", "caution"]
+    reason: str
+
+class AllergyGuidance(BaseModel):
+    allergen: str
+    reaction: str | None
+    evidence: str
+    avoid: list[AvoidMedicine]
+    alternatives: list[str]
+    note: str
+
+class AllergyReport(BaseModel):
+    guidance: list[AllergyGuidance]
+
+@app.post("/allergy-guidance")
+def allergy_guidance(req: AllergyRequest):
+    transcript = transcript_text(req.segments)
+    documented = ", ".join(part for part in [req.allergies, req.current_medications] if part and part.strip())
+    if not normalize(transcript) and not normalize(documented): return {"guidance": []}
+    system = """You support a clinician by listing medicines to avoid for allergies the patient explicitly reported. Create one entry per distinct documented allergen; ignore allergens that are only denied or absent, and return an empty list when none are documented. allergen is the substance as documented. reaction is what the patient said happened, or null. evidence is a short quote copied verbatim from the transcript. avoid lists the allergen's own drug class first, then well-established cross-reactive or same-class medicines, giving each a generic medicine name, its drug class, risk (avoid for the same class or a well-established cross-reaction, caution for a possible or lower-rate cross-reaction), and a one-sentence reason that names the mechanism or cross-reactivity. alternatives lists generic medicines from unrelated classes that are commonly used for the same purpose, with no doses. note is one sentence reminding the clinician to confirm the allergy and choose the medicine themselves. Use generic drug names, never brand names, and never give doses, prescriptions, or treatment recommendations."""
+    report = structured(system, f"Transcript:\n{transcript}\n\nDocumented allergies and medications: {documented or 'none recorded'}", AllergyReport, "allergy_report")
+    normalized = normalize(transcript)
+    return {"guidance": [item.model_dump() for item in report.guidance if in_transcript(item.evidence, normalized) or normalize(item.allergen) in normalize(documented)]}

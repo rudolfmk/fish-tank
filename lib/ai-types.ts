@@ -9,3 +9,5 @@ export type ClinicalRecord={patient:Record<string,unknown>;fields:Extraction;sta
 export type ClaimResult={status:"supported"|"partial"|"unsupported";unsupported_text:string|null;reason:string;fabricated_quotes:string[]};
 export type RedFlagAlert={condition:string;urgency:"emergency"|"urgent";triggers:string[];rationale:string;clinician_check:string};
 export type PatientSummary={greeting:string;what_happened:string;what_clinician_found:string;medicines:string;self_care:string;next_steps:string;urgent_help:string};
+export type AvoidMedicine={medicine:string;drug_class:string;risk:"avoid"|"caution";reason:string};
+export type AllergyGuidance={allergen:string;reaction:string|null;evidence:string;avoid:AvoidMedicine[];alternatives:string[];note:string};

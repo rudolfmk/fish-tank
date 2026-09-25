@@ -49,7 +49,7 @@ export async function syncDemoPatient(patient: Patient): Promise<void> {
     date_of_birth: patient.dob,
     phone: patient.phone,
     insurance_provider: patient.insurance,
-    is_synthetic: false,
+    is_synthetic: true,
   }, { onConflict: "organization_id,external_patient_id" });
   if (patientError) throw patientError;
   const { error: appointmentError } = await supabase.from("appointments").upsert({

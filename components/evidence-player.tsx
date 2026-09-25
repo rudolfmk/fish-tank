@@ -7,38 +7,75 @@ import { loadAudio } from "@/lib/audio-store";
 import { useDemo } from "./workspace-context";
 
 type Role="nurse"|"doctor";
-type Clip={role:Role;start:number|null;end:number|null;share:[number,number]};
+type Match={role:Role;fractionStart:number;fractionEnd:number;stampStart:number|null;stampEnd:number|null;stampSpan:number|null;score:number};
 
 const normalize=(text:string)=>text.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-const words=(text:string)=>new Set(normalize(text).split(" ").filter(Boolean));
+const wordsOf=(text:string)=>normalize(text).split(" ").filter(Boolean);
 
-function findClip(quote:string,sources:[Role,Segment[]][]):Clip|null{
-  const target=normalize(quote);if(!target)return null;
-  let best:{clip:Clip;score:number}|null=null;
-  for(const [role,segments] of sources){
-    const total=segments.reduce((sum,segment)=>sum+segment.text.length,0)||1;let offset=0;
-    for(const [index,segment] of segments.entries()){
-      const text=normalize(segment.text);
-      const quoteWords=words(quote);const overlap=[...quoteWords].filter(word=>words(segment.text).has(word)).length/(quoteWords.size||1);
-      const score=text.includes(target)?2:target.includes(text)&&text.length>8?1.5:overlap;
-      const next=segments[index+1]?.start;
-      const clip:Clip={role,start:segment.start??null,end:segment.end??(next!=null?next:segment.start!=null?segment.start+8:null),share:[offset/total,(offset+segment.text.length)/total]};
-      if(score>=0.6&&(!best||score>best.score))best={clip,score};
-      offset+=segment.text.length;
-    }
+// Model timestamps are frequently wrong (often compressed into a fraction of the real
+// recording), so a quote is located by where its text sits within the role's transcript
+// and timestamps are used only when they agree with both the recording length and that position.
+function locate(quote:string,role:Role,segments:Segment[]):Match|null{
+  const target=normalize(quote);
+  if(!target||!segments.length)return null;
+  const texts=segments.map(segment=>normalize(segment.text));
+  const starts:number[]=[];
+  let cursor=0;
+  for(const text of texts){starts.push(cursor);cursor+=text.length+1}
+  const full=texts.join(" ");
+  if(!full.length)return null;
+
+  let charStart=full.indexOf(target);
+  let charEnd=charStart+target.length;
+  let score=charStart>=0?1:0;
+  if(charStart<0){
+    const targetWords=new Set(wordsOf(quote));
+    let best=-1;
+    texts.forEach((text,index)=>{
+      const segmentWords=new Set(wordsOf(text));
+      const shared=[...targetWords].filter(word=>segmentWords.has(word)).length;
+      const overlap=shared/Math.max(targetWords.size,1);
+      if(overlap>score||(overlap===score&&best<0)){if(overlap>=0.4){score=overlap;best=index}}
+    });
+    if(best<0)return null;
+    charStart=starts[best];charEnd=charStart+texts[best].length;
   }
-  return best?.clip||null;
+
+  // Widen to whole segments so the clip always contains the sentence that was spoken.
+  const covering=segments.map((_,index)=>index).filter(index=>starts[index]<charEnd&&starts[index]+texts[index].length>charStart);
+  if(!covering.length)return null;
+  charStart=starts[covering[0]];
+  charEnd=starts[covering[covering.length-1]]+texts[covering[covering.length-1]].length;
+
+  const covered=covering.map(index=>segments[index]);
+  const stampStart=covered.find(segment=>segment.start!=null)?.start??null;
+  const stampEnd=[...covered].reverse().find(segment=>segment.end!=null)?.end??null;
+  const stampSpan=segments.reduce<number|null>((longest,segment)=>segment.end!=null&&(longest==null||segment.end>longest)?segment.end:longest,null);
+  return {role,fractionStart:charStart/full.length,fractionEnd:charEnd/full.length,stampStart,stampEnd,stampSpan,score};
+}
+
+function clipWindow(match:Match,length:number){
+  const estimateStart=match.fractionStart*length;
+  const estimateEnd=Math.max(match.fractionEnd*length,estimateStart+2);
+  const tolerance=Math.max(3,length*0.12);
+  const spansRecording=match.stampSpan!=null&&Math.abs(match.stampSpan-length)<=Math.max(2,length*0.1);
+  const trusted=spansRecording&&match.stampStart!=null&&Math.abs(match.stampStart-estimateStart)<=tolerance;
+  const start=trusted?match.stampStart!:estimateStart;
+  const end=trusted&&match.stampEnd!=null&&match.stampEnd>start?match.stampEnd:estimateEnd;
+  return {start:Math.max(0,start-0.6),end:Math.min(length,Math.max(end,start+3)+0.6)};
 }
 
 let current:{audio:HTMLAudioElement;url:string;stop:()=>void}|null=null;
 function stopCurrent(){if(current){current.audio.pause();URL.revokeObjectURL(current.url);current.stop();current=null}}
 
-async function duration(audio:HTMLAudioElement){
+async function audioLength(audio:HTMLAudioElement){
   await new Promise(resolve=>{if(audio.readyState>=1)resolve(null);else audio.addEventListener("loadedmetadata",()=>resolve(null),{once:true})});
-  if(Number.isFinite(audio.duration))return audio.duration;
+  if(Number.isFinite(audio.duration)&&audio.duration>0)return audio.duration;
   audio.currentTime=1e9;
   await new Promise(resolve=>audio.addEventListener("durationchange",()=>resolve(null),{once:true}));
-  const value=audio.duration;audio.currentTime=0;return Number.isFinite(value)?value:null;
+  const value=audio.duration;
+  audio.currentTime=0;
+  return Number.isFinite(value)&&value>0?value:null;
 }
 
 export function PlayEvidence({quote,label,className=""}:{quote:string;label?:string;className?:string}){
@@ -47,27 +84,32 @@ export function PlayEvidence({quote,label,className=""}:{quote:string;label?:str
   const [error,setError]=useState("");
   const mine=useRef<HTMLAudioElement|null>(null);
   useEffect(()=>()=>{if(current&&current.audio===mine.current)stopCurrent()},[]);
-  const clip=findClip(quote,[["nurse",nurseResult?.segments||[]],["doctor",doctorResult?.segments||[]]]);
+
+  const candidates=[locate(quote,"nurse",nurseResult?.segments||[]),locate(quote,"doctor",doctorResult?.segments||[])].filter(Boolean) as Match[];
+  const match=candidates.sort((a,b)=>b.score-a.score)[0]||null;
 
   const play=async(event:React.SyntheticEvent)=>{
     event.stopPropagation();event.preventDefault();
     if(playing){stopCurrent();return}
     stopCurrent();setError("");
-    if(!clip){setError("Quote not found in transcript");return}
-    const blob=await loadAudio(clip.role).catch(()=>undefined);
-    if(!blob){setError(`No ${clip.role} audio saved in this browser`);return}
-    const url=URL.createObjectURL(blob);const audio=new Audio(url);mine.current=audio;
-    current={audio,url,stop:()=>setPlaying(false)};setPlaying(true);
+    if(!match){setError("Quote not found in transcript");return}
+    const blob=await loadAudio(match.role).catch(()=>undefined);
+    if(!blob){setError(`No ${match.role} audio saved in this browser`);return}
+    const url=URL.createObjectURL(blob);
+    const audio=new Audio(url);
+    mine.current=audio;
+    current={audio,url,stop:()=>setPlaying(false)};
+    setPlaying(true);
     try{
-      let start=clip.start,end=clip.end;
-      if(start==null){const length=await duration(audio);if(length==null)throw new Error("No timestamp for this quote");start=clip.share[0]*length;end=clip.share[1]*length}
-      start=Math.max(0,start-0.4);end=(end??start+8)+0.4;
+      const length=await audioLength(audio);
+      if(length==null)throw new Error("Audio length unavailable");
+      const {start,end}=clipWindow(match,length);
       audio.currentTime=start;
-      audio.ontimeupdate=()=>{if(audio.currentTime>=end!)stopCurrent()};
+      audio.ontimeupdate=()=>{if(audio.currentTime>=end)stopCurrent()};
       audio.onended=stopCurrent;
       await audio.play();
     }catch(cause){stopCurrent();setError(cause instanceof Error?cause.message:"Playback failed")}
   };
 
-  return <span role="button" tabIndex={0} onClick={play} onKeyDown={event=>{if(event.key==="Enter"||event.key===" ")play(event)}} title={error||(clip?`Play the ${clip.role} recording where this was said`:"Quote not found in transcript")} className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition ${playing?"bg-teal-700 text-white":error?"bg-red-50 text-red-700":"bg-teal-50 text-teal-700 hover:bg-teal-100"} ${className}`}>{playing?<StopIcon className="h-3 w-3 animate-pulse"/>:<PlayIcon className="h-3 w-3"/>}{error?"Unavailable":playing?"Playing":label||"Hear it"}</span>;
+  return <span role="button" tabIndex={0} onClick={play} onKeyDown={event=>{if(event.key==="Enter"||event.key===" ")play(event)}} title={error||(match?`Play the ${match.role} recording where this was said`:"Quote not found in transcript")} className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition ${playing?"bg-teal-700 text-white":error?"bg-red-50 text-red-700":"bg-teal-50 text-teal-700 hover:bg-teal-100"} ${className}`}>{playing?<StopIcon className="h-3 w-3 animate-pulse"/>:<PlayIcon className="h-3 w-3"/>}{error?"Unavailable":playing?"Playing":label||"Hear it"}</span>;
 }

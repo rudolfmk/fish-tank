@@ -12,6 +12,7 @@ export function AllergyAvoidPanel({segments,allergies,medications}:{segments:Seg
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
   const lastKey=useRef("");
+  const denied=/^(none|no|nil|nkda|none known|no known allergies|none reported|denies allergies|no allergies)\b/i.test((allergies||"").trim());
   const key=`${allergies||""}|${segments.map(segment=>segment.text).join(" ")}`;
 
   const load=async()=>{
@@ -28,7 +29,7 @@ export function AllergyAvoidPanel({segments,allergies,medications}:{segments:Seg
     <div className="flex items-center justify-between gap-3 border-b border-line bg-gradient-to-r from-red-50 to-white p-5"><div className="flex gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-100 text-red-700"><ShieldExclamationIcon className="h-5 w-5"/></span><SectionTitle eyebrow="Allergy safety" title="Medicines to avoid" description="Based only on allergies the patient reported in this conversation."/></div><Status tone={guidance.length?"amber":"slate"}>{loading?"Checking…":guidance.length?`${guidance.length} allergen${guidance.length===1?"":"s"}`:"None found"}</Status></div>
     <div className="space-y-4 p-5">
       {error&&<p className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{error}</p>}
-      {!loading&&!guidance.length&&!error&&<p className="text-xs text-muted">The documented allergy did not produce medicine guidance. Re-run after saving the transcript.</p>}
+      {!loading&&!guidance.length&&!error&&<p className="text-xs text-muted">{denied?"The patient reported no allergies, so there is nothing to avoid on this basis. Ask again if new medicines are considered.":"No medicine guidance came back for the documented allergy. Re-check after the transcript is saved."}</p>}
       {guidance.map(item=><article key={item.allergen} className="rounded-2xl border border-red-200 bg-red-50/60 p-4">
         <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-extrabold capitalize text-red-950">{item.allergen}</h3>{item.reaction&&<span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold uppercase text-red-700">{item.reaction}</span>}<PlayEvidence quote={item.evidence} label="Hear it" className="ml-auto"/></div>
         <blockquote className="mt-2 border-l-2 border-red-300 pl-3 text-xs italic leading-5 text-red-900">“{item.evidence}”</blockquote>

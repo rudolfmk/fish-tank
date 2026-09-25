@@ -34,7 +34,7 @@ text to OpenRouter for extraction:
 OPENAI_API_KEY="your-key" uvicorn main:app --reload --port 8000 --env-file .env
 ```
 
-The frontend defaults to `http://localhost:8000`. Copy `.env.local.example` to `.env.local` only when using another backend URL. Never put `OPENAI_API_KEY` in a `NEXT_PUBLIC_*` variable.
+The frontend calls the backend through the same-origin `/api` proxy (see `next.config.ts`), which forwards to `BACKEND_URL` (default `http://localhost:8000`). Set `BACKEND_URL` when the backend runs elsewhere. Never put `OPENAI_API_KEY` in a `NEXT_PUBLIC_*` variable.
 
 ## Demo flow
 

@@ -18,6 +18,7 @@ export function AudioRecorder({role,onComplete,onLive}:{role:"nurse"|"doctor";on
   const recognition=useRef<SpeechRecognitionLike|null>(null);
   const chunks=useRef<Blob[]>([]);
   const liveLines=useRef<Segment[]>([]);
+  const pendingLine=useRef<Segment|null>(null);
   const startedAt=useRef(0);
   const defaultSpeaker=role==="nurse"?"Nurse":"Doctor";
   const activeSpeakerRef=useRef(defaultSpeaker);
@@ -42,23 +43,23 @@ export function AudioRecorder({role,onComplete,onLive}:{role:"nurse"|"doctor";on
     try{onComplete(await transcribeAudio(blob,role,name))}
     catch(serverError){
       try{await preserveBrowserTranscript(browserSegments)}
-      catch(fallbackError){setError(fallbackError instanceof Error?fallbackError.message:serverError instanceof Error?serverError.message:"Audio processing failed.")}
+      catch(fallbackError){const serverMessage=serverError instanceof Error?`Server transcription failed: ${serverError.message}. `:"";setError(serverMessage+(fallbackError instanceof Error?fallbackError.message:"Audio processing failed."))}
     }finally{setState("idle")}
   };
 
   const startLive=()=>{
     const Ctor=window.SpeechRecognition||window.webkitSpeechRecognition;
-    liveLines.current=[];startedAt.current=performance.now();
+    liveLines.current=[];pendingLine.current=null;startedAt.current=performance.now();
     if(!Ctor){setLiveSupported(false);onLive?.([],true,false);return}
     setLiveSupported(true);
     const sr=new Ctor();recognition.current=sr;sr.continuous=true;sr.interimResults=true;sr.lang="en-US";
-    sr.onresult=e=>{let interim="";for(let i=e.resultIndex;i<e.results.length;i++){const spoken=e.results[i][0].transcript.trim();if(e.results[i].isFinal&&spoken){const start=(performance.now()-startedAt.current)/1000;liveLines.current.push({speaker:explicitlyStatedRole(spoken)||activeSpeakerRef.current,text:spoken,start})}else if(!e.results[i].isFinal)interim+=`${interim?" ":""}${spoken}`}const lines=[...liveLines.current];if(interim)lines.push({speaker:explicitlyStatedRole(interim)||activeSpeakerRef.current,text:interim,start:(performance.now()-startedAt.current)/1000});onLive?.(lines,true,true)};
+    sr.onresult=e=>{let interim="";for(let i=e.resultIndex;i<e.results.length;i++){const spoken=e.results[i][0].transcript.trim();if(e.results[i].isFinal&&spoken){const start=(performance.now()-startedAt.current)/1000;liveLines.current.push({speaker:explicitlyStatedRole(spoken)||activeSpeakerRef.current,text:spoken,start})}else if(!e.results[i].isFinal)interim+=`${interim?" ":""}${spoken}`}pendingLine.current=interim?{speaker:explicitlyStatedRole(interim)||activeSpeakerRef.current,text:interim,start:(performance.now()-startedAt.current)/1000}:null;const lines=pendingLine.current?[...liveLines.current,pendingLine.current]:[...liveLines.current];onLive?.(lines,true,true)};
     sr.onerror=e=>{if(e.error!=="no-speech")setError("Live captions paused. Recorded audio will still be sent for transcription.")};
     sr.onend=()=>{if(recorder.current?.state==="recording"){try{sr.start()}catch{}}};
     try{sr.start()}catch{setLiveSupported(false)}
   };
 
-  const start=async()=>{setError("");activeSpeakerRef.current=defaultSpeaker;setActiveSpeaker(defaultSpeaker);try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});const r=new MediaRecorder(stream);recorder.current=r;chunks.current=[];r.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data)};r.onstop=()=>{recognition.current?.stop();const captured=[...liveLines.current];onLive?.(captured,false,Boolean(window.SpeechRecognition||window.webkitSpeechRecognition));stream.getTracks().forEach(t=>t.stop());process(new Blob(chunks.current,{type:r.mimeType}),"recording.webm",captured)};r.start(1000);setState("recording");startLive()}catch{setError("Microphone access was unavailable. You can upload an audio file instead.")}};
+  const start=async()=>{setError("");activeSpeakerRef.current=defaultSpeaker;setActiveSpeaker(defaultSpeaker);try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});const r=new MediaRecorder(stream);recorder.current=r;chunks.current=[];r.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data)};r.onstop=()=>{recognition.current?.stop();const captured=pendingLine.current?[...liveLines.current,pendingLine.current]:[...liveLines.current];pendingLine.current=null;onLive?.(captured,false,Boolean(window.SpeechRecognition||window.webkitSpeechRecognition));stream.getTracks().forEach(t=>t.stop());process(new Blob(chunks.current,{type:r.mimeType}),"recording.webm",captured)};r.start(1000);setState("recording");startLive()}catch{setError("Microphone access was unavailable. You can upload an audio file instead.")}};
   const upload=(e:ChangeEvent<HTMLInputElement>)=>{const f=e.target.files?.[0];if(f)process(f,f.name);e.target.value=""};
 
   const chooseSpeaker=(speaker:string)=>{activeSpeakerRef.current=speaker;setActiveSpeaker(speaker)};

@@ -62,7 +62,9 @@ function clipWindow(match:Match,length:number){
   const trusted=spansRecording&&match.stampStart!=null&&Math.abs(match.stampStart-estimateStart)<=tolerance;
   const start=trusted?match.stampStart!:estimateStart;
   const end=trusted&&match.stampEnd!=null&&match.stampEnd>start?match.stampEnd:estimateEnd;
-  return {start:Math.max(0,start-0.6),end:Math.min(length,Math.max(end,start+3)+0.6)};
+  const lead=trusted?0.6:Math.max(1.5,length*0.06);
+  const tail=trusted?0.6:Math.max(1,length*0.04);
+  return {start:Math.max(0,start-lead),end:Math.min(length,Math.max(end,start+3)+tail)};
 }
 
 let current:{audio:HTMLAudioElement;url:string;stop:()=>void}|null=null;

@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { emptyPatient, type Patient } from "@/lib/workspace-data";
 import type { AIResult, ClinicalRecord } from "@/lib/ai-types";
+import { clearAudio } from "@/lib/audio-store";
 import { isSupabaseConfigured, loadDemoPatient, syncDemoPatient } from "@/lib/supabase";
 
 type Outputs=Record<string,Record<string,unknown>>;
@@ -35,10 +36,10 @@ export function WorkspaceProvider({children}:{children:React.ReactNode}){
 
   const savePatient=(next:Patient)=>{setPatient(next);setSent(true);localStorage.setItem("clarity-patient",JSON.stringify(next));if(isSupabaseConfigured)syncDemoPatient(next).then(()=>{setSupabaseConnected(true);setSyncError(null)}).catch(error=>setSyncError(error instanceof Error?error.message:"Supabase sync failed"))};
   const setResult=(role:"nurse"|"doctor",result:AIResult)=>{(role==="nurse"?setNurseResult:setDoctorResult)(result);localStorage.setItem(`clarity-${role}`,JSON.stringify(result))};
-  const resetStage=(role:"nurse"|"doctor")=>{if(role==="nurse"){setNurseResult(null);setDoctorResult(null);["clarity-nurse","clarity-doctor"].forEach(key=>localStorage.removeItem(key))}else{setDoctorResult(null);localStorage.removeItem("clarity-doctor")}setRecordState(null);setOutputsState(null);["clarity-record","clarity-outputs"].forEach(key=>localStorage.removeItem(key))};
+  const resetStage=(role:"nurse"|"doctor")=>{clearAudio(...(role==="nurse"?["nurse","doctor"] as const:["doctor"] as const));if(role==="nurse"){setNurseResult(null);setDoctorResult(null);["clarity-nurse","clarity-doctor"].forEach(key=>localStorage.removeItem(key))}else{setDoctorResult(null);localStorage.removeItem("clarity-doctor")}setRecordState(null);setOutputsState(null);["clarity-record","clarity-outputs"].forEach(key=>localStorage.removeItem(key))};
   const setRecord=(next:ClinicalRecord)=>{setRecordState(next);localStorage.setItem("clarity-record",JSON.stringify(next))};
   const setOutputs=(next:Outputs)=>{setOutputsState(next);localStorage.setItem("clarity-outputs",JSON.stringify(next))};
-  const resetWorkspace=()=>{setPatient(emptyPatient);setSent(false);setNurseResult(null);setDoctorResult(null);setRecordState(null);setOutputsState(null);["clarity-patient","clarity-nurse","clarity-doctor","clarity-record","clarity-outputs"].forEach(key=>localStorage.removeItem(key))};
+  const resetWorkspace=()=>{clearAudio("nurse","doctor");setPatient(emptyPatient);setSent(false);setNurseResult(null);setDoctorResult(null);setRecordState(null);setOutputsState(null);["clarity-patient","clarity-nurse","clarity-doctor","clarity-record","clarity-outputs"].forEach(key=>localStorage.removeItem(key))};
   return <WorkspaceContext.Provider value={{patient,savePatient,sent,setSent,nurseResult,doctorResult,setResult,resetStage,record,setRecord,outputs,setOutputs,resetWorkspace,supabaseConnected,syncError}}>{children}</WorkspaceContext.Provider>;
 }
 

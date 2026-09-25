@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ExclamationTriangleIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 import type { RedFlagAlert, Segment } from "@/lib/ai-types";
 import { detectRedFlags } from "@/lib/api";
+import { PlayEvidence } from "./evidence-player";
 
 const transcriptKey=(segments:Segment[])=>segments.map(segment=>`${segment.speaker}:${segment.text}`).join("\n");
 
@@ -40,7 +41,7 @@ export function RedFlagAlerts({segments,live}:{segments:Segment[];live:boolean})
     <div className="space-y-3 p-5">{active.map(alert=><article key={alert.condition} className="rounded-xl border border-red-200 bg-white p-4">
       <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-extrabold text-red-900">{alert.condition}</h3><span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${alert.urgency==="emergency"?"bg-red-600 text-white":"bg-amber-100 text-amber-800"}`}>{alert.urgency}</span><button onClick={()=>setAcknowledged(new Set(acknowledged).add(alert.condition))} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-[10px] font-bold text-red-800 hover:bg-red-50"><CheckIcon className="h-3.5 w-3.5"/> Acknowledge</button></div>
       <p className="mt-2 text-xs leading-5 text-slate-700">{alert.rationale}</p>
-      <div className="mt-3 flex flex-wrap gap-2">{alert.triggers.map(trigger=><q key={trigger} className="rounded-md bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-900">{trigger}</q>)}</div>
+      <div className="mt-3 flex flex-wrap gap-2">{alert.triggers.map(trigger=><span key={trigger} className="inline-flex items-center gap-1.5 rounded-md bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-900"><q>{trigger}</q><PlayEvidence quote={trigger} label="Play"/></span>)}</div>
       <p className="mt-3 text-xs text-slate-600"><b className="text-slate-800">Check:</b> {alert.clinician_check}</p>
     </article>)}
     <p className="text-[10px] leading-4 text-red-900/70">Decision support only, based on quotes from this transcript. It is not a diagnosis; the clinician decides what to do.</p></div>

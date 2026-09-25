@@ -5,6 +5,7 @@ import { ArrowUpTrayIcon, ExclamationCircleIcon, MicrophoneIcon, StopIcon } from
 import { analyzeTranscript, transcribeAudio } from "@/lib/api";
 import type { AIResult, EvidenceField, Segment } from "@/lib/ai-types";
 import { explicitlyStatedRole } from "@/lib/speaker-attribution";
+import { saveAudio } from "@/lib/audio-store";
 
 type SpeechResultEvent={resultIndex:number;results:ArrayLike<{isFinal:boolean;0:{transcript:string}}>};
 type SpeechRecognitionLike={continuous:boolean;interimResults:boolean;lang:string;start:()=>void;stop:()=>void;onresult:((e:SpeechResultEvent)=>void)|null;onerror:((e:{error:string})=>void)|null;onend:(()=>void)|null};
@@ -40,9 +41,9 @@ export function AudioRecorder({role,onComplete,onLive}:{role:"nurse"|"doctor";on
 
   const process=async(blob:Blob,name?:string,browserSegments:Segment[]=[] )=>{
     setState("processing");setError("");
-    try{onComplete(await transcribeAudio(blob,role,name))}
+    try{const result=await transcribeAudio(blob,role,name);await saveAudio(role,blob).catch(()=>undefined);onComplete(result)}
     catch(serverError){
-      try{await preserveBrowserTranscript(browserSegments)}
+      try{await preserveBrowserTranscript(browserSegments);await saveAudio(role,blob).catch(()=>undefined)}
       catch(fallbackError){const serverMessage=serverError instanceof Error?`Server transcription failed: ${serverError.message}. `:"";setError(serverMessage+(fallbackError instanceof Error?fallbackError.message:"Audio processing failed."))}
     }finally{setState("idle")}
   };
